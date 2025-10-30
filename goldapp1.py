@@ -222,7 +222,6 @@ fig_corr = px.imshow(
     color_continuous_scale="RdBu_r",
     zmin=-1,
     zmax=1,
-    title="Correlation Between Gold and Silver Prices (Live Data)",
     labels=dict(color="Correlation Coefficient")
 )
 fig_corr.update_layout(
@@ -279,3 +278,4 @@ else:
 # ------------------ FOOTER ------------------
 st.markdown("---")
 st.caption("**Data Sources:** Yahoo Finance • GoodReturns.in • Web Archive (for % change) | **100% Live** • Built with Streamlit")
+
