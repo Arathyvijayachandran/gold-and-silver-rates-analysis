@@ -1,4 +1,4 @@
-#🪙 Gold & Silver Live Price Dashboard
+# 🪙 Gold & Silver Live Price Dashboard #
 Real-Time Commodity Price Monitoring | Streamlit + Yahoo Finance + Web Scraping
 
 This project is an interactive Gold & Silver price tracker dashboard built using Streamlit, featuring real-time market data, city-wise price analysis, and financial insights through charts, volatility metrics, and correlation analysis.
