@@ -48,7 +48,6 @@ with st.spinner(f"Fetching {time_option} of live market data..."):
             gold_df = yf.download(gold_ticker, start=start_date, end=end_date, progress=False, auto_adjust=True)
             silver_df = yf.download(silver_ticker, start=start_date, end=end_date, progress=False, auto_adjust=True)
             usd_inr = yf.download(usd_inr_ticker, start=start_date, end=end_date, progress=False, auto_adjust=True)
-   
     except Exception as e:
         st.error(f"Data fetch failed: {e}")
         st.stop()
@@ -140,82 +139,92 @@ else:
 # ================== LIVE ADD-ONS ======================
 # ======================================================
 
-# ------------------------------------------------------
-# 2) CITY-WISE BAR CHART (LIVE TODAY ONLY)
-# ------------------------------------------------------
-st.markdown("### City-Wise Gold & Silver Rates (Top 10 Highest - Today)")
+# -------------------- CITY SCRAPER --------------------
+
 @st.cache_data(ttl=300)
 def get_city_live_rates():
     url = "https://www.goodreturns.in/gold-rates/"
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         soup = BeautifulSoup(r.text, 'html.parser')
-        table = soup.find("table", {"id": "gold_rates"})
-        rows = table.find_all("tr")[1:]
+
+        table = soup.find("table")
+        if table is None:
+            raise Exception("Table not found")
+
+        rows = table.find_all("tr")[1:12]
         data = []
+
         for tr in rows:
             cols = tr.find_all("td")
-            if len(cols) >= 3:
+            if len(cols) >= 2:
                 city = cols[0].text.strip()
-                gold_24k = cols[1].text.replace("₹", "").replace(",", "").strip()
-                silver = cols[2].text.replace("₹", "").replace(",", "").strip()
-                if gold_24k and gold_24k.replace(".", "").isdigit():
-                    data.append({
-                        "City": city,
-                        "Gold": float(gold_24k),
-                        "Silver": float(silver) if silver and silver.replace(".", "").isdigit() else np.nan
-                    })
-        return pd.DataFrame(data).dropna()
+                gold = cols[1].text.replace("₹","").replace(",","").strip()
+
+                if gold.replace('.', "").isdigit():
+                    data.append({"City": city, "Gold": float(gold)})
+
+        df = pd.DataFrame(data)
+        df["Silver"] = np.nan
+        return df.dropna()
+
     except Exception as e:
-        st.warning(f"GoodReturns scrape failed: {e}. Using futures estimate.")
-        cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune", "Ahmedabad", "Jaipur", "Lucknow"]
+        st.info("Fetching city rates failed — using fallback values.")
+        cities = ["Mumbai","Delhi","Bangalore","Chennai","Kolkata","Hyderabad","Pune","Ahmedabad","Jaipur","Lucknow"]
         return pd.DataFrame({
             "City": cities,
-            "Gold": np.random.normal(gold_price, gold_price * 0.01, len(cities)),
-            "Silver": np.random.normal(silver_price, silver_price * 0.015, len(cities))
+            "Gold": np.random.normal(gold_price, gold_price * 0.01, 10),
+            "Silver": np.nan
         }).round(2)
 
+
+# -------------------- CITY CHART --------------------
+st.markdown("### Top 10 Highest Gold & Silver Rates Today")
+
 city_df = get_city_live_rates()
-selected_metal = st.selectbox("Select Metal", ["Gold", "Silver"], key="city_metal")
-display_col = selected_metal
-top_cities = city_df.sort_values(display_col, ascending=False).head(10)
-lowest_city = city_df.loc[city_df[display_col].idxmin()]
+selected_metal = st.selectbox("Select Metal", ["Gold", "Silver"], key="city")
 
-fig_bar = px.bar(
+top_cities = city_df.sort_values(selected_metal, ascending=False).head(10)
+
+fig = px.bar(
     top_cities,
-    x="City", y=display_col,
-    text=display_col,
-    color=display_col,
-    color_continuous_scale="ylorrd" if selected_metal == "Gold" else "greys",
-    title=f"Top 10 Cities with Highest {selected_metal} Rates (Today)"
+    x="City",
+    y=selected_metal,
+    text=selected_metal,
+    color_discrete_sequence=["#DAA520"] if selected_metal=="Gold" else ["#A9A9A9"],  # Single tone
 )
-fig_bar.update_traces(texttemplate='₹%{text:,.0f}', textposition='outside')
-fig_bar.update_layout(xaxis_title="", yaxis_title="Price (INR/gram)")
-st.plotly_chart(fig_bar, use_container_width=True)
 
-highest = top_cities.iloc[0]
-col_h, col_l = st.columns(2)
-with col_h:
-    st.success(f"**Highest {selected_metal}:** {highest['City']} → ₹{highest[display_col]:,.2f}/gram")
-with col_l:
-    st.error(f"**Lowest {selected_metal}:** {lowest_city['City']} → ₹{lowest_city[display_col]:,.2f}/gram")
+fig.update_traces(
+    texttemplate='₹%{y:.0f}',
+    textposition='outside'
+)
 
+fig.update_layout(
+    title=f"Top 10 Cities with Highest {selected_metal} Rates",
+    xaxis_title="City",
+    yaxis_title="Price (INR/gram)",
+    template="plotly_dark",
+    showlegend=False,
+    margin=dict(l=20,r=20,t=60,b=20)
+)
 
-# ------------------------------------------------------
-# 3) CORRELATION HEATMAP – GOLD vs SILVER (LIVE DATA)
-# ------------------------------------------------------
+st.plotly_chart(fig, use_container_width=True)
+
+best = top_cities.iloc[0]
+worst = city_df.loc[city_df[selected_metal].idxmin()]
+st.success(f"Highest: **{best['City']}** → ₹{best[selected_metal]:,.2f}")
+st.error(f"Lowest: **{worst['City']}** → ₹{worst[selected_metal]:,.2f}")
+
+# ------------------ CORRELATION HEATMAP ------------------
 st.markdown("### Correlation Heatmap: Gold vs Silver ")
 
-# Prepare correlation data (using live INR-per-gram series)
 corr_df = pd.DataFrame({
     'Gold (INR/g)': gold_df['INR_per_gram'],
     'Silver (INR/g)': silver_df['INR_per_gram']
 }).dropna()
 
-# Compute correlation matrix
 corr_matrix = corr_df.corr()
 
-# Create Plotly Heatmap
 fig_corr = px.imshow(
     corr_matrix,
     text_auto=".2f",
@@ -231,51 +240,34 @@ fig_corr.update_layout(
 )
 st.plotly_chart(fig_corr, use_container_width=True)
 
-# Insight message
-corr_value = corr_matrix.iloc[0, 1]
-if corr_value > 0.8:
-    st.success(f"✅ Gold and Silver move **strongly together** (Correlation = {corr_value:.2f})")
-elif corr_value > 0.4:
-    st.warning(f"⚠️ Gold and Silver move **moderately together** (Correlation = {corr_value:.2f})")
-else:
-    st.error(f"❌ Gold and Silver move **independently** (Correlation = {corr_value:.2f})")
+val = corr_matrix.iloc[0,1]
+if val>0.8: st.success(f"✅ Strong correlation ({val:.2f})")
+elif val>0.4: st.warning(f"⚠️ Moderate correlation ({val:.2f})")
+else: st.error(f"❌ Weak correlation ({val:.2f})")
 
-
-# ------------------------------------------------------
-# 4) DUAL % CHANGE LINE CHART
-# ------------------------------------------------------
+# ------------------ % CHANGE CHART ------------------
 st.markdown("### Daily % Change (Gold & Silver)")
-gold_pct = gold_reindexed.pct_change() * 100
-silver_pct = silver_reindexed.pct_change() * 100
 pct_df = pd.DataFrame({
     'Date': gold_df.index.date,
-    'Gold %Δ': gold_pct.round(2),
-    'Silver %Δ': silver_pct.round(2)
-}).dropna(subset=['Gold %Δ', 'Silver %Δ'], how='all')
+    'Gold %Δ': gold_df['INR_per_gram'].pct_change() * 100,
+    'Silver %Δ': silver_df['INR_per_gram'].pct_change() * 100
+}).dropna()
 
 if not pct_df.empty:
     fig_pct = px.line(
         pct_df,
-        x='Date',
-        y=['Gold %Δ', 'Silver %Δ'],
-        color_discrete_map={'Gold %Δ': '#FFD700', 'Silver %Δ': '#C0C0C0'},
+        x="Date",
+        y=["Gold %Δ", "Silver %Δ"],
+        color_discrete_map={"Gold %Δ": "#FFD700", "Silver %Δ": "#C0C0C0"},
         labels={"value": "Daily Change (%)"}
     )
     fig_pct.update_layout(
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis_title="Date",
-        yaxis_title="Daily Change (%)",
-        hovermode='x unified',
         template="plotly_dark",
-        margin=dict(l=40, r=40, t=40, b=40)
+        legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1),
     )
-    fig_pct.add_hline(y=0, line_dash="dot", line_color="gray", opacity=0.5)
-    fig_pct.update_traces(hovertemplate='%{y:.2f}%')
+    fig_pct.add_hline(y=0,line_dash="dot",line_color="gray",opacity=0.5)
     st.plotly_chart(fig_pct, use_container_width=True)
-else:
-    st.info("Not enough data to show % change.")
 
 # ------------------ FOOTER ------------------
 st.markdown("---")
-st.caption("**Data Sources:** Yahoo Finance • GoodReturns.in • Web Archive (for % change) | **100% Live** • Built with Streamlit")
-
+st.caption("**Data Sources:** Yahoo Finance • GoodReturns.in | Live Dashboard | Built with Streamlit")
